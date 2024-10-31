@@ -42,7 +42,7 @@ def updateDict(dic, destroy, repair, val):
 def createDict():
     # key = [RandomDestroy, ShawDestroy, WorstDestroy, GreedyRepair, RandomRepair, RegretRepair]
     key = [RandomDestroy, RandomRepair]
-    value = np.zeros(6, int)
+    value =  np.zeros(len(key), int)
     dic = dict(zip(key, value))
     return dic
 
@@ -77,8 +77,8 @@ class Problem:
         :param ei_s_arr: array of Expected Inventory for self  预计在各站点未来时间窗内的单车库存，用于判断是否需要对站点进行重新分配调度。
         :param ei_c_arr: array of Expected Inventory for competitor  预测竞争对手单车在站点的库存，用于在多方环境中对比调度策略的效果。
         :param esd_arr: array of Expected Satisfied Demand  预期满足需求量，用于预测在不同调度策略下，某个站点的需求满足情况
-        :param x_s_arr: original number of x_s at planning point 在调度开始时的站点自有单车数量，作为调度基准
-        :param x_c_arr: original number of x_c at planning point  在调度开始时的竞争对手单车数量，用于计算 multi 模式下的满足需求情况
+        :param x_s_arr: original number of x_s at planning point 在对应时刻调度开始时的站点自有单车数量，作为调度基准
+        :param x_c_arr: original number of x_c at planning point  在对应时刻调度开始时的竞争对手单车数量，用于计算 multi 模式下的满足需求情况
         :param alpha: weight of relocation cost  权衡重新分配成本与需求满足情况的参数，用于控制调度的偏好（例如更关注成本或更关注需求满足）
         :param plot: whether to plot the result
         :param mode: 'multi' or 'single  multi 模式考虑竞争对手库存，single 模式则不考虑。
@@ -175,17 +175,20 @@ class Problem:
         :return:
         """
         init_sol = Solution(van_loc=self.van_loc, van_dis_left=self.van_dis_left, van_load=self.van_load)
-        customers = [val for val in self.customers if val not in self.van_loc]
+        customers = [val for val in self.customers if val not in self.van_loc]  # 存储所有未被车的初始位置覆盖的站点，即各车需要访问的目标站点集合。
         # customers = list(self.customers)
         # greedy algorithm
         for van in range(self.num_of_van):
-            loc = init_sol.van_loc[van]  # 站点位置
-            dis_left = init_sol.van_dis_left[van]  # 到达时间
+            loc = init_sol.van_loc[van]  # 站点位置  初始位置
+            dis_left = init_sol.van_dis_left[van]  # 到达时间  剩余可用距离
             # load = init_sol.van_loc[van]  # 初始负载
-            route, last_node = [loc], loc  # 潜在路径
+            route, last_node = [loc], loc  # 潜在路径  # 初始路径从起始位置开始
+            # # 如果 route 仅包含一个站点（即车辆起始位置），函数直接返回 True
+            #  如果  route  大于1个站点  则计算路径总的时间消耗否小于等于规划的时间窗口
+            # 每次都选最近的一点，直到这条路径不可行停止
             while self.route_com.is_feasible_init_route(dis_left=dis_left, route=route):
-                node_ind = np.argmin(self.c_mat[last_node][i] for i in customers)
-                last_node = customers[node_ind]
+                node_ind = np.argmin(self.c_mat[last_node][i] for i in customers)  # 使用 c_mat 距离矩阵找到 last_node 到 customers 中各站点的最短距离站点的索引 node_ind
+                last_node = customers[node_ind]  #更新 last_node 为最近站点，并将其从 customers 中移除。
                 route.append(last_node)
                 customers.pop(node_ind)
                 # customers.remove(last_node)
@@ -194,7 +197,7 @@ class Problem:
             # cost, instruct = self.route_com.compute_route(r=route, t_left=dis_left, init_l=load)
             # cost, instruct = self.route_com.get_sol_cost(r=route, t_left=dis_left, init_l=load)
             init_sol.add_route(route=route)
-
+        # 保证 路径数量等于车辆数量
         assert init_sol.is_feasible(self.num_of_van)
         init_sol.usages = [False for _ in range(self.num_of_van)]
         self.route_com.compute_total_cost(solution=init_sol)
@@ -285,7 +288,7 @@ class Problem:
                 # simulated annealing acceptance
                 acc_p = math.exp((tmpVal - current_sol.total_cost) / temp) if temp > 0.05 else 0
 
-                # better than global best
+                # better than global best  优于全局最佳值
                 if tmpVal > global_sol.total_cost:
                     global_sol = tmp_sol
                     current_sol = copy.deepcopy(tmp_sol)
@@ -294,20 +297,20 @@ class Problem:
                     self.operator_score = updateDict(self.operator_score, Destroy, Repair, self.params.theta1)
                     noImprove = 0
 
-                # better than current sol
+                # better than current sol  优于当前解 current_sol，但未达到全局最优
                 elif tmpVal > current_sol.total_cost:
                     current_sol = tmp_sol
                     currentVal = tmp_sol.total_cost
                     self.operator_score = updateDict(self.operator_score, Destroy, Repair, self.params.theta2)
 
-                # accord with the accept rule
+                # accord with the accept rule  依照模拟退火准则接受
                 elif acc_p > random.random():
                     current_sol = copy.deepcopy(tmp_sol)
                     currentVal = tmp_sol.total_cost
                     self.operator_score = updateDict(self.operator_score, Destroy, Repair, self.params.theta3)
                     noImprove += 1
 
-                # deposit
+                # deposit  不满足任何条件的情况（不接受新解）
                 else:
                     self.operator_score = updateDict(self.operator_score, Destroy, Repair, self.params.theta4)
                     noImprove += 1
